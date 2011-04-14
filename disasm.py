@@ -2,90 +2,10 @@
 # A quick-and-dirty disassembler
 #
 
+from array import array
 import re
 
 
-class Status(object):
-    """Status holds the current context while disassembling. It includes the
-       values of the M and X status register bits, and the address of the
-       instruction currently being handled."""
-    def __init__(self):
-        self.m = 0
-        self.x = 0
-        self.adr = 0
-
-#
-# Some functions for reading primitives from a stream, possibly modified by
-# current status register
-#
-def byte(src, status):
-    status.adr += 1
-    return src.next()
-
-def short(src, status):
-    status.adr += 2
-    return src.next() | (src.next() << 8)
-
-def long(src, status):
-    status.adr += 3
-    return src.next() | (src.next() << 8) | (src.next() << 16)
-
-
-# The magical operands format map!
-#
-# Each operand format maps to a tuple, with the following elements:
-#  [0] - function used to read the correct number of bytes from the stream
-#  [1] - function returning the desired representation of the operand
-#
-formats = {
-    'const*': (
-            lambda s,p: byte(s,p) if p.m else short(s,p),
-            lambda n,p: '%02X'%n if p.m else '%04X'%n),
-
-    'const+': (
-            lambda s,p: byte(s,p) if p.x else short(s,p),
-            lambda n,p: '%02X'%n if p.x else '%04X'%n),
-
-    'short': (short,        lambda n,p: '%04X' % n),
-    'byte' : (byte,         lambda n,p: '%02X' % n),
-    'addr' : (short,        lambda n,p: '$%04X' % n),
-    'near' : (byte,         lambda n,p: '%d' % n),
-    'nearx': (short,        lambda n,p: '%d'% n),
-    'long' : (long,         lambda n,p: '$%06X' % n),
-    'dp'   : (byte,         lambda n,p: '$%02X' % n),
-    'sr'   : (byte,         lambda n,p: '%d' % n),
-}
-
-formats_pattern = re.compile('|'.join([re.escape(s) for s in formats]))
-
-
-
-def parser(desc):
-    """Constructs a parsing function based on the given description string."""
-
-    mnemonic = desc[0:3]
-    format = ''
-    if len(desc) > 3:
-        format = desc [4:]
-
-    consume = None
-    stringify = None
-
-    # Which operand format does this instruction use?
-    match = formats_pattern.search(format)
-    if match:
-        consume, stringify = formats[match.group(0)]
-
-    # Replace the operand format with a placeholder for stringify
-    format = formats_pattern.sub('%s', format)
-
-
-    # Define the actual parsing function and return it as a closure
-    def parser(src, status):
-        operand = consume(src, status)
-        print mnemonic, format % stringify(operand, status)
-
-    return parser
 
 
 #
@@ -436,6 +356,152 @@ instruction_set = {
 
 
 assert(len(instruction_set) == 256)
+
+
+
+class Status(object):
+    """Status holds the current context while disassembling. It includes the
+       values of the M and X status register bits, and the address of the
+       instruction currently being handled."""
+    def __init__(self):
+        self.m = 0
+        self.x = 0
+        self.adr = 0
+
+#
+# Some functions for reading primitives from a stream, possibly modified by
+# current status register
+#
+def byte(src, status):
+    status.adr += 1
+    return src.next()
+
+def short(src, status):
+    status.adr += 2
+    return src.next() | (src.next() << 8)
+
+def long(src, status):
+    status.adr += 3
+    return src.next() | (src.next() << 8) | (src.next() << 16)
+
+
+# The magical operands format map!
+#
+# Each operand format maps to a tuple, with the following elements:
+#  [0] - function used to read the correct number of bytes from the stream
+#  [1] - function returning the desired representation of the operand
+#
+formats = {
+    'const*': (
+            lambda s,p: byte(s,p) if p.m else short(s,p),
+            lambda n,p: '%02X'%n if p.m else '%04X'%n),
+
+    'const+': (
+            lambda s,p: byte(s,p) if p.x else short(s,p),
+            lambda n,p: '%02X'%n if p.x else '%04X'%n),
+
+    'short': (short,        lambda n,p: '%04X' % n),
+    'byte' : (byte,         lambda n,p: '%02X' % n),
+    'addr' : (short,        lambda n,p: '$%04X' % n),
+    'near' : (byte,         lambda n,p: '%d' % n),
+    'nearx': (short,        lambda n,p: '%d'% n),
+    'long' : (long,         lambda n,p: '$%06X' % n),
+    'dp'   : (byte,         lambda n,p: '$%02X' % n),
+    'sr'   : (byte,         lambda n,p: '%d' % n),
+}
+
+formats_pattern = re.compile('|'.join([re.escape(s) for s in formats]))
+
+
+
+def parser(desc):
+    """Constructs a parsing function based on the given description string."""
+
+    mnemonic = desc[0:3]
+    format = ''
+    if len(desc) > 3:
+        format = desc [4:]
+
+    consume = lambda a,b: None
+    stringify = lambda a,b: ''
+
+    # Which operand format does this instruction use?
+    match = formats_pattern.search(format)
+    if match:
+        consume, stringify = formats[match.group(0)]
+
+    # Replace the operand format with a placeholder for stringify
+    format,count = formats_pattern.subn('%s', format)
+    format = mnemonic + ' ' + format
+
+
+    # Define the actual parsing function and return it as a closure
+    def parser(src, status):
+        operand = consume(src, status)
+        if count == 0:
+            return format
+        else:
+            return format % stringify(operand, status)
+
+    return parser
+
+
+#
+# This is horrible
+#
+
+def disassemble(src, base):
+    parsers = dict([(i, parser(x)) for i,x in instruction_set.items()])
+    status = Status()
+    status.adr = base
+    op = None
+    while op != 0x6B and op != 0x60:
+        adr = 0xC00000 + status.adr
+        bank = (adr & 0xFF0000) >> 16
+        offset = adr & 0xFFFF
+
+        op = byte(src,status)
+
+        print '%02X/%04X: ' % (bank,offset),
+        print parsers[op](src, status)
+
+
+def loadfile(filename):
+    f = open(filename)
+    return array('B', f.read())
+
+
+def iterfrom(container, offset):
+    while True:
+        try:
+            offset += 1
+            yield container[offset - 1]
+        except IndexError:
+            raise StopIteration()
+
+
+
+
+if __name__ == '__main__':
+
+    address = 0x062A
+
+    src = iterfrom(loadfile('../earthbound.smc'), address)
+
+    disassemble(src, address)
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
