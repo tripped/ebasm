@@ -374,74 +374,86 @@ class Status(object):
 #
 def byte(src, status):
     status.adr += 1
-    return src.next()
+    return next(src)
 
 def short(src, status):
     status.adr += 2
-    return src.next() | (src.next() << 8)
+    return next(src) | (next(src) << 8)
 
 def long(src, status):
     status.adr += 3
-    return src.next() | (src.next() << 8) | (src.next() << 16)
+    return next(src) | (next(src) << 8) | (next(src) << 16)
 
-
+#
 # The magical operands format map!
 #
-# Each operand format maps to a tuple, with the following elements:
-#  [0] - function used to read the correct number of bytes from the stream
-#  [1] - function returning the desired representation of the operand
+# Each type of operand is processed by a pair of functions: a consumer and a
+# stringifier. The consumer reads the correct number of operand bytes from a
+# stream, and the stringifier renders the operand in a desired fashion.
+# 
+# Each function also takes a 'status' parameter which tracks the state of the
+# disassembly. It's implied that the consumer mutates the status.
+#
+# In a nutshell:
+#   consume: stream -> status -> operand-value
+#   stringify: operand-value -> status -> string
+#   formats: operand-type -> (consume, stringify)
 #
 formats = {
     'const*': (
-            lambda s,p: byte(s,p) if p.m else short(s,p),
-            lambda n,p: '%02X'%n if p.m else '%04X'%n),
-
+        lambda s,p: byte(s,p) if p.m else short(s,p),
+        lambda n,p: '${:0{w}X}'.format(n, w = 2 if p.m else 4)
+    ),
     'const+': (
-            lambda s,p: byte(s,p) if p.x else short(s,p),
-            lambda n,p: '%02X'%n if p.x else '%04X'%n),
-
-    'short': (short,        lambda n,p: '%04X' % n),
-    'byte' : (byte,         lambda n,p: '%02X' % n),
-    'addr' : (short,        lambda n,p: '$%04X' % n),
-    'near' : (byte,         lambda n,p: '%d' % n),
-    'nearx': (short,        lambda n,p: '%d'% n),
-    'long' : (long,         lambda n,p: '$%06X' % n),
-    'dp'   : (byte,         lambda n,p: '$%02X' % n),
-    'sr'   : (byte,         lambda n,p: '%d' % n),
+        lambda s,p: byte(s,p) if p.x else short(s,p),
+        lambda n,p: '${:0{w}X}'.format(n, w = 2 if p.m else 4)
+    ),
+    'short': (short,        lambda n,p: '${:04X}'.format(n)),
+    'byte' : (byte,         lambda n,p: '${:02X}'.format(n)),
+    'addr' : (short,        lambda n,p: '${:04X}'.format(n)),
+    'near' : (byte,         lambda n,p: '{}'.format(n)),
+    'nearx': (short,        lambda n,p: '{}'.format(n)),
+    'long' : (long,         lambda n,p: '${:06X}'.format(n)),
+    'dp'   : (byte,         lambda n,p: '${:02X}'.format(n)),
+    'sr'   : (byte,         lambda n,p: '{}'.format(n)),
 }
 
 formats_pattern = re.compile('|'.join([re.escape(s) for s in formats]))
 
 
 
-def parser(desc):
-    """Constructs a parsing function based on the given description string."""
+def makeparser(description):
+    """Constructs an operand parsing/disassembling function for the described
+       instruction. The returned function, when given a byte stream and status
+       object, will read a correctly-sized operand from the stream and return
+       a very pretty disassembly of the instruction.
+       
+       Example:
+            makeparser('ADC #const*')
+            
+       makeparser looks at the operand type ('const*') and employs appropriate
+       consume and stringify functions to handle the operand. The mnemonic (in
+       this case ADC) is for printing only and has no effect on the behavior of
+       the parser.
+       
+       The status object passed to the parse function should be initialized
+       with the appropriate settings of the P and PC registers."""
 
-    mnemonic = desc[0:3]
-    format = ''
-    if len(desc) > 3:
-        format = desc [4:]
-
-    consume = lambda a,b: None
-    stringify = lambda a,b: ''
+    consume = lambda s,p: None
+    stringify = lambda n,p: ''
 
     # Which operand format does this instruction use?
-    match = formats_pattern.search(format)
+    match = formats_pattern.search(description)
     if match:
         consume, stringify = formats[match.group(0)]
 
     # Replace the operand format with a placeholder for stringify
-    format,count = formats_pattern.subn('%s', format)
-    format = mnemonic + ' ' + format
-
+    description = formats_pattern.sub('{}', description)
 
     # Define the actual parsing function and return it as a closure
     def parser(src, status):
         operand = consume(src, status)
-        if count == 0:
-            return format
-        else:
-            return format % stringify(operand, status)
+        return description.format(stringify(operand, status))
 
     return parser
 
@@ -451,7 +463,7 @@ def parser(desc):
 #
 
 def disassemble(src, base):
-    parsers = dict([(i, parser(x)) for i,x in instruction_set.items()])
+    parsers = dict([(i, makeparser(x)) for i,x in instruction_set.items()])
     status = Status()
     status.adr = base
     op = None
@@ -459,15 +471,12 @@ def disassemble(src, base):
         adr = 0xC00000 + status.adr
         bank = (adr & 0xFF0000) >> 16
         offset = adr & 0xFFFF
-
         op = byte(src,status)
-
-        print '%02X/%04X: ' % (bank,offset),
-        print parsers[op](src, status)
+        print('{:02X}/{:04X} {}'.format(bank, offset, parsers[op](src, status)))
 
 
 def loadfile(filename):
-    f = open(filename)
+    f = open(filename, mode='rb')
     return array('B', f.read())
 
 
@@ -486,28 +495,6 @@ if __name__ == '__main__':
 
     address = 0x062A
 
-    src = iterfrom(loadfile('../earthbound.smc'), address)
+    src = iterfrom(loadfile('earthbound.smc'), address)
 
     disassemble(src, address)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
