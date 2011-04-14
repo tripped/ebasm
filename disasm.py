@@ -364,9 +364,11 @@ class Status(object):
        values of the M and X status register bits, and the address of the
        instruction currently being handled."""
     def __init__(self):
-        self.m = 0
-        self.x = 0
-        self.adr = 0
+        self.op = 0     # Current opcode
+        self.m = 0      # State of m bit of flags register
+        self.x = 0      # State of x bit of flags register
+        self.pc = 0     # Value of the program counter register
+        self.adr = 0    # Next read address
 
 #
 # Some functions for reading primitives from a stream, possibly modified by
@@ -383,6 +385,10 @@ def short(src, status):
 def long(src, status):
     status.adr += 3
     return next(src) | (next(src) << 8) | (next(src) << 16)
+
+def signed(byte):
+    """Sign-extends a byte to a signed integer."""
+    return byte - 2 * (byte & 0x80)
 
 #
 # The magical operands format map!
@@ -411,8 +417,10 @@ formats = {
     'short': (short,        lambda n,p: '${:04X}'.format(n)),
     'byte' : (byte,         lambda n,p: '${:02X}'.format(n)),
     'addr' : (short,        lambda n,p: '${:04X}'.format(n)),
-    'near' : (byte,         lambda n,p: '{}'.format(n)),
-    'nearx': (short,        lambda n,p: '{}'.format(n)),
+
+    # PC-relative operands are transformed into absolute addresses
+    'near' : (byte,         lambda n,p: '${:04X}'.format(p.pc + signed(n))),
+    'nearx': (short,        lambda n,p: '${:04X}'.format(p.pc + signed(n))),
     'long' : (long,         lambda n,p: '${:06X}'.format(n)),
     'dp'   : (byte,         lambda n,p: '${:02X}'.format(n)),
     'sr'   : (byte,         lambda n,p: '{}'.format(n)),
@@ -459,20 +467,26 @@ def makeparser(description):
 
 
 #
-# This is horrible
+# This is horrible, but getting slightly better
 #
 
 def disassemble(src, base):
     parsers = dict([(i, makeparser(x)) for i,x in instruction_set.items()])
+
+    # Initialize status
     status = Status()
-    status.adr = base
-    op = None
-    while op != 0x6B and op != 0x60:
-        adr = 0xC00000 + status.adr
-        bank = (adr & 0xFF0000) >> 16
-        offset = adr & 0xFFFF
-        op = byte(src,status)
-        print('{:02X}/{:04X} {}'.format(bank, offset, parsers[op](src, status)))
+    status.adr = base + 0xC00000
+    status.pc = base & 0xFFFF
+
+    while status.op != 0x6B and status.op != 0x60:
+        # Store the bank and PC offset for the current instruction before reading it
+        bank   = (status.adr & 0xFF0000) >> 16
+        offset = (status.adr & 0xFFFF)
+
+        # Read next instruction
+        status.op = byte(src, status)
+        status.pc = (status.adr + 1) & 0xFFFF
+        print('{:02X}/{:04X} {}'.format(bank, offset, parsers[status.op](src, status)))
 
 
 def loadfile(filename):
