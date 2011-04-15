@@ -386,9 +386,13 @@ def long(src, status):
     status.adr += 3
     return next(src) | (next(src) << 8) | (next(src) << 16)
 
-def signed(byte):
+def signedbyte(n):
     """Sign-extends a byte to a signed integer."""
-    return byte - 2 * (byte & 0x80)
+    return n - 2 * (n & 0x80)
+
+def signedshort(n):
+    """Sign-extends a short to a signed integer."""
+    return n - 2 * (n & 0x8000)
 
 #
 # The magical operands format map!
@@ -419,15 +423,21 @@ formats = {
     'addr' : (short,        lambda n,p: '${:04X}'.format(n)),
 
     # PC-relative operands are transformed into absolute addresses
-    'near' : (byte,         lambda n,p: '${:04X}'.format(p.pc + signed(n))),
-    'nearx': (short,        lambda n,p: '${:04X}'.format(p.pc + signed(n))),
+    'near' : (byte,         lambda n,p: '${:04X}'.format(p.pc + signedbyte(n))),
+    'nearx': (short,        lambda n,p: '${:04X}'.format(p.pc + 1 + signedshort(n))),
     'long' : (long,         lambda n,p: '${:06X}'.format(n)),
     'dp'   : (byte,         lambda n,p: '${:02X}'.format(n)),
     'sr'   : (byte,         lambda n,p: '{}'.format(n)),
 }
 
-formats_pattern = re.compile('|'.join([re.escape(s) for s in formats]))
 
+# Build a regexp for finding operand types in a string. We sort the keys in
+# order of descending length to avoid missing a longer key by finding a short
+# key first, e.g., "BRL nearx" matches "near" before it matches "nearx".
+
+pattern = re.compile(
+        '|'.join(map(re.escape, sorted(formats.keys(), key=len, reverse=True)))
+    )
 
 
 def makeparser(description):
@@ -451,12 +461,12 @@ def makeparser(description):
     stringify = lambda n,p: ''
 
     # Which operand format does this instruction use?
-    match = formats_pattern.search(description)
+    match = pattern.search(description)
     if match:
         consume, stringify = formats[match.group(0)]
 
     # Replace the operand format with a placeholder for stringify
-    description = formats_pattern.sub('{}', description)
+    description = pattern.sub('{}', description)
 
     # Define the actual parsing function and return it as a closure
     def parser(src, status):
@@ -507,7 +517,7 @@ def iterfrom(container, offset):
 
 if __name__ == '__main__':
 
-    address = 0x062A
+    address = 0xb4df #0x1A9D
 
     src = iterfrom(loadfile('earthbound.smc'), address)
 
