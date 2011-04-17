@@ -199,8 +199,8 @@ instruction_set = {
     0x56 : 'LSR dp,X',
 
     # MVN/MVP
-    0x54 : 'MVN src,dest',
-    0x44 : 'MVP src,dest',
+    0x54 : 'MVN src,dst',
+    0x44 : 'MVP src,dst',
 
     # NOP
     0xEA : 'NOP',
@@ -397,7 +397,7 @@ def signedshort(n):
 # formats that depend on the current status of the CPU.
 #
 formats = { 'const*', 'const+', 'short', 'byte', 'addr', 'near', 'nearx',
-            'long', 'dp', 'sr' }
+            'long', 'dp', 'sr', 'src,dst' }
 
 operand_consumers = {
     'const*': lambda s,p: byte(s) if p.m else short(s),
@@ -409,7 +409,8 @@ operand_consumers = {
     'nearx':  lambda s,p: short(s),
     'long':   lambda s,p: long(s),
     'dp':     lambda s,p: byte(s),
-    'sr':     lambda s,p: byte(s)
+    'sr':     lambda s,p: byte(s),
+    'src,dst':lambda s,p: short(s)
 }
 
 operand_stringifiers = {
@@ -422,7 +423,8 @@ operand_stringifiers = {
     'nearx':  lambda n,p: '${:04X}'.format(p.pc + 3 + signedshort(n)),
     'long':   '${:06X}'.format,
     'dp':     '${:02X}'.format,
-    'sr':     '{}'.format
+    'sr':     '{}'.format,
+    'src,dst':lambda n,p: '${:02X},${:02X}'.format((n & 0xFF), (n & 0xFF00) >> 8)
 }
 
 #
