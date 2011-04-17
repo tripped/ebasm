@@ -530,20 +530,26 @@ class Instruction(object):
 
 
 
-def disassembly(inst, address=True, machine=True):
+def disassembly(inst, address=True, machine=True, status=True):
     '''Returns a string representation of the disassembly of an instruction.
         @param inst The instruction to disassemble
         @param address If true, the instruction's address will be included
         @param machine If true, the raw machine code will be included'''
 
-    extras = '' 
+    result = '' 
 
     if address:
-        extras += '{:02X}/{:04X}: '.format(inst.status.pbr, inst.status.pc)
+        result += '{:02X}/{:04X}: '.format(inst.status.pbr, inst.status.pc)
     if machine:
-        extras += '{:13}'.format(' '.join(map('{:02X}'.format, inst)))
+        result += '{:13}'.format(' '.join(map('{:02X}'.format, inst)))
+    
+    result += '{:20}'.format(str(inst))
 
-    return extras + str(inst)
+    if status:
+        result += '{} {}'.format('-M-' if inst.status.m else '---',
+                                '-X-' if inst.status.x else '---')
+
+    return result
 
 #
 # This is horrible, but getting slightly better
@@ -564,6 +570,22 @@ def instruction(src, status):
     op = next(src)
     operand = readers[op](src, status)
 
+    # Determine new values of m and x flags
+    m = status.m
+    x = status.x
+
+    # SEP and REP modify status bits directly
+    if op == 0xE2:  # SEP
+        if operand[0] & 0x20: m = 1
+        if operand[0] & 0x10: x = 1
+    elif op == 0xC2:  # REP
+        if operand[0] & 0x20: m = 0
+        if operand[0] & 0x10: x = 0
+    # Subroutine jumps are assumed to reset status bits
+    elif op in {0x22, 0x20, 0xFC}:
+        m = 0
+        x = 0
+
     # Now we have enough information to compute the successor status. It'll go
     # like this:
     #  - First, the program counter of the successor is incremented
@@ -582,7 +604,11 @@ def instruction(src, status):
     #        
 
     inst = Instruction(op, operand, status)
-    newstatus = Status(pbr = status.pbr, pc = status.pc + len(inst), m = status.m, x = status.x)
+    newstatus = Status(
+            pbr = status.pbr,
+            pc = status.pc + len(inst),
+            m = m,
+            x = x)
 
     return (inst, newstatus)
 
@@ -641,6 +667,6 @@ if __name__ == '__main__':
 
     src = iterfrom(loadfile(filename), address)
 
-    disassemble(src, address)
+    disassemble(src, address + 0xC00000)
 
 
