@@ -496,7 +496,7 @@ from collections import namedtuple
 # consists of the values of the program counter register and the m and x bits
 # from the CPU status register.
 #
-Status = namedtuple('Status', ['pc', 'm', 'x'])
+Status = namedtuple('Status', ['pbr', 'pc', 'm', 'x'])
 
 
 class Instruction(object):
@@ -539,9 +539,7 @@ def disassembly(inst, address=True, machine=True):
     extras = '' 
 
     if address:
-        extras += '{bank:X}/{offset:X}: '.format(
-            bank = (inst.status.pc & 0xFF0000) >> 16,
-            offset = inst.status.pc & 0xFFFF)
+        extras += '{:02X}/{:04X}: '.format(inst.status.pbr, inst.status.pc)
     if machine:
         extras += '{:13}'.format(' '.join(map('{:02X}'.format, inst)))
 
@@ -584,30 +582,36 @@ def instruction(src, status):
     #        
 
     inst = Instruction(op, operand, status)
-    newstatus = Status(pc = status.pc + len(inst), m = status.m, x = status.x)
+    newstatus = Status(pbr = status.pbr, pc = status.pc + len(inst), m = status.m, x = status.x)
 
     return (inst, newstatus)
 
 
+def subroutine(src, status):
+    '''Reads a subroutine from src, reading instructions sequentially until an
+       RTL (0x6B) or RTS (0x60) opcode is reached. Returns pair (func,status),
+       where func is an object representing the subroutine and status is the
+       expected state of the CPU on return from the subroutine.'''
+
+    instructions = []
+
+    inst = None
+    while not inst or inst.op != 0x6b and inst.op != 0x60:
+        inst,status = instruction(src, status)
+        instructions.append(inst)
+
+    return (instructions, status)
+    
 
 def disassemble(src, base):
 
     # Initialize status
-    status = Status(base, 0, 0)
+    status = Status((base & 0xFF0000) >> 16, base & 0xFFFF, 0, 0)
 
-    instructions = []
+    instructions,status = subroutine(src, status)
 
-    inst = Instruction(0,0,0)
-
-    while inst.op != 0x6B and inst.op != 0x60:
-        inst,status = instruction(src, status)
-        instructions += inst
-        print(disassembly(inst))
-
-
-    print('Read {} instructions!'.format(len(instructions)))
-        
-        
+    for i in instructions:
+        print(disassembly(i))
 
 
 def loadfile(filename):
