@@ -1,2 +1,4 @@
 *.swp
 *.smc
+*.pyc
+65816info.txt
