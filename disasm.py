@@ -33,11 +33,74 @@ def disassemble(src, base):
 
 
 
+class Segment(object):
+    def __init__(self, ilist):
+        self.instructions = ilist
+        self.address = (ilist[0].status.pbr << 16) | ilist[0].status.pc
+
+class Subroutine(Segment):
+    pass
+
+
+
+def recursive_subroutine(container, address, status, entities=dict()):
+
+    if address in entities:
+        return entities[address]
+
+
+def recursive_segment(container, address, status, entities=dict(), seen=dict{}):
+    '''Disassembles a segment'''
+
+    if address in entities:
+        return entities[address]
+
+    src = iterfrom(container, address)
+
+    instructions = []
+    inst = None
+    while True:
+        inst, status = instruction(src, status)
+        instructions.append(inst)
+
+        # JSL long
+        if inst.op == 0x22:
+            sub,status = recursive_subroutine(container, inst.operand, status, entities)
+            entities[inst.operand] = sub
+        # JSR short
+        elif inst.op == 0x20:
+            subadr = makeadr(inst.status.pbr, inst.operand)
+            sub,status = recursive_subroutine(container, subadr, status, entities)
+            entities[subadr] = sub
+
+        # if it's a JMP instruction, we're done with this segment. In the case
+        # of a direct JMP/JML, the caller should continue with a new segment
+        # at the new PC.
+
+def recursive_disassemble(container, address, status, entities=dict()):
+    '''
+        entities = list of all disassembled entities, whether lone instructions
+        or subroutines (a subroutine is, for now, just a list of instructions)
+    '''
+
+    if address in entities:
+        return entities[address]
+
+    src = iterfrom(container, address)
+
+    instructions = []
+    inst = None
+
+
 def bank(address):
     return (address & 0xFF0000) >> 16
 
 def offset(address):
     return address & 0xFFFF
+
+def makeadr(bank, offset):
+    return (bank << 16) | offset
+
 
 # TODO: this should be a parameter
 goodbanks = { 0xC0, 0xC1, 0xC2, 0xC3, 0xC4, 0xEE, 0xEF }
