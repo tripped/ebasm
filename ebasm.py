@@ -1,4 +1,5 @@
-##
+#!/usr/bin/python3
+#
 # A quick-and-dirty 65816 disassembler.
 #
 
