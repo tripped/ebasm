@@ -8,26 +8,30 @@
 import re
 
 
-from instructionset import instruction_set
+from instructionset import * 
 
+from collections import namedtuple
 
 #------------------------------------------------------------------------------
 # Stuff for reading and formatting operands
 #------------------------------------------------------------------------------
 
+Operand = namedtuple('Operand', ['value', 'len'])
+Operand.__len__ = lambda self: self.len
+Operand.__int__ = lambda self: self.value
 
 #
 # Functions for reading primitives from a stream. Each returns a tuple
 # containing the primitive value and its size in bytes. 
 #
 def byte(src):
-    return next(src), 1
+    return Operand(next(src), 1)
 
 def short(src):
-    return (next(src) | (next(src) << 8)), 2
+    return Operand((next(src) | (next(src) << 8)), 2)
 
 def long(src):
-    return (next(src) | (next(src) << 8) | (next(src) << 16)), 3
+    return Operand((next(src) | (next(src) << 8) | (next(src) << 16)), 3)
 
 
 #
@@ -146,7 +150,6 @@ stringifiers = { k : makestringifier(v) for k,v in instruction_set.items() }
 
 
 
-from collections import namedtuple
 
 #
 # Status represents the state of the 65816 at a particular point in time. It
@@ -218,8 +221,12 @@ def instruction(src, status):
        'successor' status of the instruction, i.e. the state of the CPU after
        executing the instruction.
 
-        @param src An iterable byte stream from which to read the instruction
-        @param status An object recording state of the 65816 at the place in
+       If the instruction read was a branch instruction other than BRA or BRL,
+       status is a tuple consisting of the successor status for both possible
+       paths of the branch.
+
+       @param src An iterable byte stream from which to read the instruction
+       @param status An object recording state of the 65816 at the place in
                  the program where the instruction occurs; must include m, x
                  flags and pc register value.'''
 
@@ -276,6 +283,11 @@ def instruction(src, status):
     #        
 
     inst = Instruction(op, operand, status)
+
+    if isbranch(op):
+        
+        pc = status.pc + signedbyte(operand)
+
     newstatus = Status(
             pbr = status.pbr,
             pc = status.pc + len(inst),
