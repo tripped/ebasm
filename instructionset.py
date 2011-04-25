@@ -346,3 +346,29 @@ instruction_set = {
 }
 
 assert(len(instruction_set) == 256)
+
+#------------------------------------------------------------------------------
+# Some useful predicates over the instruction set
+#------------------------------------------------------------------------------
+
+def isbranch(op):
+    '''Returns True iff op is a branching instruction OTHER THAN BRL or BRA.'''
+    return op in { 0x90, 0xB0, 0xF0, 0xD0, 0x30, 0x10, 0x50, 0x70 }
+
+
+def isreturn(op):
+    '''Returns True iff op is RTL or RTS.'''
+    return op in { 0x60, 0x6B }
+
+def isjmp(op):
+    '''Returns True iff op is an absolute jump.'''
+    return op in { 0x4C, 0x5C }
+
+def isindirectjmp(op):
+    '''Returns True iff op is an indirect (untraceable) jump.'''
+    return op in { 0x6C, 0x7C, 0xDC, 0xFC }
+
+
+
+
+
