@@ -36,11 +36,11 @@ def long(src):
 #
 def signedbyte(n):
     '''Sign-extends a byte to a signed integer.'''
-    return n - 2 * (n & 0x80)
+    return (int(n) ^ 0x80) - 0x80
 
 def signedshort(n):
     '''Sign-extends a short to a signed integer.'''
-    return n - 2 * (n & 0x8000)
+    return (int(n) ^ 0x8000) - 0x8000
 
 
 #
