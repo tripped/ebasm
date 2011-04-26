@@ -159,6 +159,7 @@ stringifiers = { k : makestringifier(v) for k,v in instruction_set.items() }
 Status = namedtuple('Status', ['pbr', 'pc', 'm', 'x'])
 
 
+
 class Instruction(object):
     '''An instruction is an instance of a 65816 machine instruction, including
        the machine opcode, its operand, and the status of the CPU at that point
@@ -234,17 +235,34 @@ def instruction(src, status):
     op = next(src)
     operand = readers[op](src, status)
 
+    # Now we have enough information to compute the successor status. It'll go
+    # like this:
+    #  - First, the program counter of the successor is incremented
+    #     - successor.pc = status.pc + 1 + len(operand)
+    #  - Then we compute the new status of m and x flags:
+    #     - If the op is SEP or REP, the status change is computed from
+    #       its operand
+    #     - If the op is a JSL/JSR, we can do one of two things:
+    #        1. Assume that it resets m and x to 0. This is probably a good
+    #           assumption in most cases.
+    #        2. Examine the function being jumped to, if necessary reading
+    #           and disassembling it first, to see if it changes m or x.
+    #           Determining this in general is of course impossible, but we
+    #           could probably make some good guesses.
+    #     - In all other cases, m and x are unchanged.
+    #        
+
     # Determine new values of m and x flags
     m = status.m
     x = status.x
 
     # SEP and REP modify status bits directly
     if op == 0xE2:  # SEP
-        if operand[0] & 0x20: m = 1
-        if operand[0] & 0x10: x = 1
+        if int(operand) & 0x20: m = 1
+        if int(operand) & 0x10: x = 1
     elif op == 0xC2:  # REP
-        if operand[0] & 0x20: m = 0
-        if operand[0] & 0x10: x = 0
+        if int(operand) & 0x20: m = 0
+        if int(operand) & 0x10: x = 0
     # Subroutine jumps are assumed to reset status bits
     elif op in {0x22, 0x20, 0xFC}:
         m = 0
@@ -265,33 +283,33 @@ def instruction(src, status):
         c,e = e,c
     '''
 
-    # Now we have enough information to compute the successor status. It'll go
-    # like this:
-    #  - First, the program counter of the successor is incremented
-    #     - successor.pc = status.pc + 1 + len(operand)
-    #  - Then we compute the new status of m and x flags:
-    #     - If the op is SEP or REP, the status change is computed from
-    #       its operand
-    #     - If the op is a JSL/JSR, we can do one of two things:
-    #        1. Assume that it resets m and x to 0. This is probably a good
-    #           assumption in most cases.
-    #        2. Examine the function being jumped to, if necessary reading
-    #           and disassembling it first, to see if it changes m or x.
-    #           Determining this in general is of course impossible, but we
-    #           could probably make some good guesses.
-    #     - In all other cases, m and x are unchanged.
-    #        
 
     inst = Instruction(op, operand, status)
 
-    if isbranch(op):
-        
+    # Compute the successor address
+    if op == 0x4C: # JMP absolute
+        pbr = status.pbr
+        pc = int(operand)
+    elif op == 0x5C: # JML absolute long
+        pbr = bank(int(operand))
+        pc  = offset(int(operand))
+    elif op == 0x80: # BRA near
+        pbr = status.pbr
         pc = status.pc + signedbyte(operand)
+    elif op == 0x82: # BRL near extended
+        pbr = status.pbr
+        pc = status.pc + signedshort(operand)
+    else:
+        pbr = status.pbr
+        pc = status.pc
 
-    newstatus = Status(
-            pbr = status.pbr,
-            pc = status.pc + len(inst),
-            m = m,
-            x = x)
+    successor = Status(pbr, pc, m, x)
 
-    return (inst, newstatus)
+    # For conditional branches we produce two successors, one for each path.
+    if isbranch(op):
+        taken = Status(pbr = status.pbr, m = m, x = x,
+                pc = status.pc + signedbyte(operand))
+        successor = (taken, successor)
+
+    return (inst, successor)
+
