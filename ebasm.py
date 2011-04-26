@@ -224,6 +224,62 @@ def testwindow(container, start, flags=0):
     print('not_code confidence: {}'.format(not_code))
 
 
+# Closed disassembly
+#
+# Construct a code graph based on all branches and jumps. NOTE: we also need to
+# fix successor status handling in core. In particular, what is the successor
+# status of a branch instruction like BEQ? I think part of the confusion here
+# relates from the questionable choice to make PBR and PC part of the status;
+# those registers are of course not determined by succession from the "last"
+# instruction, but by the location of the instruction under consideration.
+#
+# That it is a poor choice can be seen by its uselessness: in the case of a
+# non-branching instruction, the PBR and PC values are trivial; in the case of
+# a branching instruction, they are unknowable.
+#
+# For the time being, we'll fix instruction loading in the core so that PBR and
+# PC are always given correct values. While we're at it we'll add seekable
+# iterators to the interface; that's needed doing for some time. This nonsense
+# about sometimes needing to give a container and sometimes needing to give an
+# iterable is just a bit too much trouble.
+#
+# In fact, that use of "blind" iterators is partly what led to the faulty PBR
+# and PC tracking; the instruction() function takes a plain byte iterator, so
+# it has no way of knowing what location it's reading from.
+#
+# Actually, is a position-aware iterator the best way to give instruction() the
+# information about code location? That means that instruction() would then be
+# responsible for handling address translation. Maybe it's better, actually, to
+# still use the successor status method: just be less stupid about it.
+#
+# Think: if we read a BEQ, there are actually two possible successors; one with
+# PC + len(inst), and one with PC + operand(inst). In the case of a closed
+# disassembly, we are interested in following both branches; we must simply use
+# the correct successor status for each branch. instruction() should return
+# both statuses in that case.
+#
+# So, for the moment, hold off on seekable iterators. Principle of least power.
+
+
+def closed_disassembly(container, offset):
+    pass
+
+
+def closed_node(container, status):
+    '''
+    Returns a graph node from the given location
+    '''
+    src = iterfrom(container, makeadr(status.pbr, status.pc))
+
+    inst = None
+    while not inst or not isreturn(inst.op):
+        inst,succ = instruction(src,status)
+
+    # TODO: finish
+
+
+
+
 def loadfile(filename):
     f = open(filename, mode='rb')
     return array('B', f.read())
